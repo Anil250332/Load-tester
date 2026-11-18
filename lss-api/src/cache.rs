@@ -29,18 +29,23 @@ type ListCacheKey = (String, i64, i64);
 pub struct AppCache {
     /// Immutable product info — cached forever.
     pub products: DashMap<String, ProductInfo>,
+    /// Product counts per category — updated on create_product and preload.
+    pub category_counts: DashMap<String, i64>,
     /// Sold-out flags — once set, never unset (stock never increases).
     pub sold_out: DashSet<String>,
     /// Stock cache with 1s TTL.
     pub stock: Cache<String, i64>,
     /// List page cache with 1s TTL, invalidated on POST /products for that category.
     pub list_pages: Cache<ListCacheKey, (Vec<u8>, i64)>,
+    /// User orders cache with 1.5s TTL (spec allows up to 2s).
+    pub user_orders: Cache<String, Vec<u8>>,
 }
 
 impl AppCache {
     pub fn new() -> Self {
         Self {
             products: DashMap::with_capacity(16384),
+            category_counts: DashMap::new(),
             sold_out: DashSet::new(),
             stock: Cache::builder()
                 .time_to_live(Duration::from_secs(1))
@@ -49,6 +54,10 @@ impl AppCache {
             list_pages: Cache::builder()
                 .time_to_live(Duration::from_secs(1))
                 .max_capacity(50_000)
+                .build(),
+            user_orders: Cache::builder()
+                .time_to_live(Duration::from_millis(1500))
+                .max_capacity(100_000)
                 .build(),
         }
     }

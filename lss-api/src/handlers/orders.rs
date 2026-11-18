@@ -101,23 +101,12 @@ pub async fn create_order(
     }
 
     // 3. Transaction: order insert + stock decrement
-    // NOTE: We do NOT short-circuit on sold_out before the transaction because
-    // ALREADY_PURCHASED must take priority over SOLD_OUT (spec: "retry → ALREADY_PURCHASED").
-    // The transaction checks duplicate first (INSERT), then stock (UPDATE).
-    // The sold_out flag is used INSIDE the transaction as an optimization to skip
-    // the UPDATE query when we know stock is 0 (after the INSERT succeeds).
-    let pool_clone = pool.clone();
-    let cache_clone = cache.clone();
-    let user_id_clone = user_id.clone();
-    let product_id_clone = product_id.clone();
-
-    let result = tokio::spawn(async move {
-        do_order_transaction(&pool_clone, &cache_clone, &user_id_clone, &product_id_clone).await
-    })
-    .await;
+    let result = do_order_transaction(&pool, &cache, &user_id, &product_id).await;
 
     match result {
-        Ok(OrderResult::Success(order_id)) => {
+        OrderResult::Success(order_id) => {
+            cache.user_orders.invalidate(&user_id).await;
+
             #[derive(serde::Serialize)]
             struct OrderResponse {
                 #[serde(rename = "orderId")]
@@ -141,13 +130,9 @@ pub async fn create_order(
             )
                 .into_response()
         }
-        Ok(OrderResult::AppErr(app_err)) => app_err.into_response(),
-        Ok(OrderResult::InternalErr(msg)) => {
+        OrderResult::AppErr(app_err) => app_err.into_response(),
+        OrderResult::InternalErr(msg) => {
             tracing::error!("Order transaction failed: {}", msg);
-            internal_error()
-        }
-        Err(e) => {
-            tracing::error!("Order task panicked: {}", e);
             internal_error()
         }
     }
@@ -241,8 +226,18 @@ async fn do_order_transaction(
 /// GET /users/:userId/orders — get user's orders.
 pub async fn get_user_orders(
     pool: Arc<PgPool>,
+    cache: Arc<AppCache>,
     user_id: String,
 ) -> Response {
+    if let Some(cached_bytes) = cache.user_orders.get(&user_id).await {
+        return (
+            StatusCode::OK,
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            cached_bytes,
+        )
+            .into_response();
+    }
+
     match sqlx::query_as::<_, (String, String)>(
         "SELECT order_id, product_id FROM orders WHERE user_id = $1"
     )
@@ -272,14 +267,17 @@ pub async fn get_user_orders(
                 .collect();
 
             let body = serde_json::to_string(&UserOrdersResponse {
-                user_id,
+                user_id: user_id.clone(),
                 orders,
             }).unwrap_or_default();
+
+            let body_bytes = body.into_bytes();
+            cache.user_orders.insert(user_id, body_bytes.clone()).await;
 
             (
                 StatusCode::OK,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
-                body,
+                body_bytes,
             )
                 .into_response()
         }

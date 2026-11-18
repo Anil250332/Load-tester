@@ -137,7 +137,8 @@ fn build_router(state: Arc<AppState>) -> Router {
     let s = state.clone();
     let get_user_orders_handler = move |Path(user_id): Path<String>| {
         let pool = s.pool.clone();
-        async move { handlers::orders::get_user_orders(pool, user_id).await }
+        let cache = s.cache.clone();
+        async move { handlers::orders::get_user_orders(pool, cache, user_id).await }
     };
 
     Router::new()
@@ -159,6 +160,7 @@ async fn preload_products(pool: &PgPool, cache: &AppCache) {
         Ok(rows) => {
             let count = rows.len();
             for (id, name, category, price, stock) in rows {
+                cache.category_counts.entry(category.clone()).and_modify(|c| *c += 1).or_insert(1);
                 cache.products.insert(id.clone(), cache::ProductInfo {
                     id: id.clone(),
                     name: name.clone(),

@@ -68,6 +68,7 @@ pub async fn create_product(
         Ok(Some(_)) => {
             // Successfully inserted — cache it
             let cat_clone = category.clone();
+            cache.category_counts.entry(cat_clone.clone()).and_modify(|c| *c += 1).or_insert(1);
             cache.products.insert(id.clone(), ProductInfo {
                 id: id.clone(),
                 name: name.clone(),
@@ -242,20 +243,49 @@ pub async fn list_products(
 
     let offset = (page - 1) * limit;
 
-    // Get total count
-    let total = match sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM products WHERE category = $1"
-    )
-    .bind(&category)
-    .fetch_one(&*pool)
-    .await
-    {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::error!("DB error counting products: {}", e);
-            return internal_error();
+    // Get total count from in-memory category_counts or fallback to DB
+    let total = if let Some(count) = cache.category_counts.get(&category) {
+        *count
+    } else {
+        match sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM products WHERE category = $1"
+        )
+        .bind(&category)
+        .fetch_one(&*pool)
+        .await
+        {
+            Ok(t) => {
+                cache.category_counts.insert(category.clone(), t);
+                t
+            }
+            Err(e) => {
+                tracing::error!("DB error counting products: {}", e);
+                return internal_error();
+            }
         }
     };
+
+    // Fast path: if category has no products or requested page is past the end, return empty items
+    if total == 0 || offset >= total {
+        #[derive(serde::Serialize)]
+        struct ListResponse {
+            items: Vec<ProductFull>,
+            page: i64,
+            limit: i64,
+            total: i64,
+        }
+
+        let resp = ListResponse { items: Vec::new(), page, limit, total };
+        let body = serde_json::to_vec(&resp).unwrap_or_default();
+        cache.list_pages.insert(cache_key, (body.clone(), total)).await;
+
+        return (
+            StatusCode::OK,
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            body,
+        )
+            .into_response();
+    }
 
     // Get items
     let items = match sqlx::query_as::<_, (String, String, String, i64, i64)>(
