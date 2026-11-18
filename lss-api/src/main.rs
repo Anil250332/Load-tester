@@ -143,9 +143,9 @@ fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/health", get(health_handler))
         .route("/products", post(create_product_handler).get(list_products_handler))
-        .route("/products/{id}", get(get_product_handler))
+        .route("/products/:id", get(get_product_handler))
         .route("/orders", post(create_order_handler))
-        .route("/users/{userId}/orders", get(get_user_orders_handler))
+        .route("/users/:userId/orders", get(get_user_orders_handler))
 }
 
 /// Preload existing products into cache on startup.

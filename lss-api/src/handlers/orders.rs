@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::cache::AppCache;
 use crate::errors::{AppError, internal_error};
+use crate::validation;
 
 /// Atomic counter for fast order ID generation.
 static ORDER_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -55,14 +56,14 @@ pub async fn create_order(
         None => return AppError::ValidationError.into_response(),
     };
 
-    let user_id = match obj.get("userId") {
-        Some(Value::String(s)) if !s.is_empty() => s.clone(),
-        _ => return AppError::ValidationError.into_response(),
+    let user_id = match obj.get("userId").and_then(validation::validate_id) {
+        Some(s) => s,
+        None => return AppError::ValidationError.into_response(),
     };
 
-    let product_id = match obj.get("productId") {
-        Some(Value::String(s)) if !s.is_empty() => s.clone(),
-        _ => return AppError::ValidationError.into_response(),
+    let product_id = match obj.get("productId").and_then(validation::validate_id) {
+        Some(s) => s,
+        None => return AppError::ValidationError.into_response(),
     };
 
     // 2. Product existence check (cache, then DB on miss) → 404
@@ -93,6 +94,10 @@ pub async fn create_order(
 
     if !product_exists {
         return AppError::ProductNotFound.into_response();
+    }
+
+    if cache.is_sold_out(&product_id) {
+        return AppError::SoldOut.into_response();
     }
 
     // 3. Transaction: order insert + stock decrement

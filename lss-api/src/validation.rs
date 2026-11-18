@@ -20,7 +20,10 @@ pub fn validate_non_negative_integer(val: &Value) -> Option<i64> {
             }
             if n.is_u64() {
                 let u = n.as_u64().unwrap_or(0);
-                return Some(u as i64);
+                if u <= i64::MAX as u64 {
+                    return Some(u as i64);
+                }
+                return None;
             }
             // It's a float (10.0, 10.5, etc.) → reject
             None
@@ -33,7 +36,8 @@ pub fn validate_non_negative_integer(val: &Value) -> Option<i64> {
 pub fn validate_string(val: &Value, max_len: usize) -> Option<String> {
     match val {
         Value::String(s) => {
-            if s.is_empty() || s.len() > max_len {
+            let count = s.chars().count();
+            if count == 0 || count > max_len {
                 None
             } else {
                 Some(s.clone())
