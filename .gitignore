@@ -1,0 +1,19 @@
+# Rust build artifacts
+/lss-api/target/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+
+# PEM keys
+*.pem

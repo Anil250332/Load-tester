@@ -1,0 +1,23 @@
+[Unit]
+Description=Last Server Standing Flash Sale API
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=lss
+Group=lss
+ExecStart=/opt/lss/lss-api
+Restart=always
+RestartSec=1
+LimitNOFILE=1048576
+Environment=DATABASE_URL=postgres://lss:lss@localhost/lss?sslmode=disable
+Environment=LISTEN_ADDR=0.0.0.0:8080
+Environment=DB_POOL_SIZE=24
+Environment=RUST_LOG=warn
+WorkingDirectory=/opt/lss
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
