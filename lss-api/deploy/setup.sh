@@ -40,12 +40,20 @@ echo ">>> After apt:"
 check_disk
 
 # ---- 2. Rust toolchain (if not installed) ----
+export PATH="/root/.cargo/bin:/home/ubuntu/.cargo/bin:$PATH"
 if ! command -v cargo &>/dev/null; then
     echo ">>> Installing Rust (minimal profile)..."
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
-    source "$HOME/.cargo/env"
+    if [ -f "$HOME/.cargo/env" ]; then
+        source "$HOME/.cargo/env"
+    fi
 fi
-export PATH="$HOME/.cargo/bin:$PATH"
+if [ -f "$HOME/.cargo/env" ]; then
+    source "$HOME/.cargo/env"
+elif [ -f "/home/ubuntu/.cargo/env" ]; then
+    source "/home/ubuntu/.cargo/env"
+fi
+export PATH="/root/.cargo/bin:/home/ubuntu/.cargo/bin:$HOME/.cargo/bin:$PATH"
 echo ">>> After Rust:"
 check_disk
 
@@ -61,7 +69,10 @@ journalctl --vacuum-size=100M 2>/dev/null || true
 
 # ---- 4. PostgreSQL config ----
 echo ">>> Configuring PostgreSQL..."
-PG_VERSION=$(pg_lsclusters -h | head -1 | awk '{print $1}')
+PG_VERSION=$(pg_lsclusters -h 2>/dev/null | head -1 | awk '{print $1}')
+if [ -z "$PG_VERSION" ]; then
+    PG_VERSION=$(ls /etc/postgresql 2>/dev/null | head -1)
+fi
 PG_CONF_DIR="/etc/postgresql/${PG_VERSION}/main/conf.d"
 mkdir -p "$PG_CONF_DIR"
 cp "$SCRIPT_DIR/tuning.conf" "$PG_CONF_DIR/tuning.conf"
@@ -135,12 +146,14 @@ chmod +x /opt/lss/lss-api
 
 # Create lss user if needed
 id -u lss &>/dev/null || useradd --system --no-create-home --shell /bin/false lss
+chown -R lss:lss /opt/lss
 
 # ---- 11. Clean up build artifacts to save disk ----
 echo ">>> Cleaning build artifacts..."
 rm -rf "$PROJECT_DIR/target"
 rm -rf "$HOME/.cargo/registry"
 rm -rf "$HOME/.cargo/git"
+rm -rf /home/ubuntu/.cargo/registry /home/ubuntu/.cargo/git 2>/dev/null || true
 echo ">>> After cleanup:"
 check_disk
 
